@@ -98,7 +98,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
     optimizer_D = torch.optim.Adam(D.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
     loss_l1 = torch.nn.L1Loss()
     loss_bce = torch.nn.BCELoss()
-    loss_lpips = lpips.LPIPS(net='alex').requires_grad_(False)
+    loss_lpips = lpips.LPIPS(net='alex').requires_grad_(False).to(device)
     model.train()
     cam2world_pose = LookAtPoseSampler.sample(3.14/2, 3.14/2, torch.tensor([0, 0, 0.2], device=device), radius=2.7, device=device)
     intrinsics = FOV_to_intrinsics(fov_deg, device=device)
