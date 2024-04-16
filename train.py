@@ -167,7 +167,8 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             for param_group in optimizer_lp3d.param_groups:
                 param_group['lr'] = lr
             optimizer_lp3d.step()
-        torch.save(model.state_dict(), f'./checkpoint/lp3d_{epoch}.pth')
+            print(f'Epoch: {epoch}, Iter: {i}, lp3d_loss: {lp3d_loss.item()}, D_loss: {D_loss.item()}')
+        torch.save(model.state_dict(), f'./checkpoint/lp3d.pth')
 
         
 if __name__ == "__main__":
