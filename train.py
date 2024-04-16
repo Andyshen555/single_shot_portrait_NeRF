@@ -89,8 +89,6 @@ def create_samples(N=256, voxel_origin=[0, 0, 0], cube_length=2.0):
     samples[:, 1] = (samples[:, 1] * voxel_size) + voxel_origin[1]
     samples[:, 2] = (samples[:, 2] * voxel_size) + voxel_origin[0]
 
-    num_samples = N ** 3
-
     return samples.unsqueeze(0), voxel_origin, voxel_size
 
 def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
@@ -106,55 +104,53 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
     for epoch in range(args.epoch):
         for i in range(3000):
             lr = get_learning_rate(epoch * 3000 + i)
-            with autocast():
 
-                # first view
-                z = torch.from_numpy(np.random.randn(1, G.z_dim)).to(device)
-                angle_p = np.random.uniform(-0.2, 0.2)
-                angle_y = np.random.uniform(-0.4, 0.4)
-                cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
-                cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
-                cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
-                conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
-                camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-                conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+            # first view
+            z = torch.from_numpy(np.random.randn(1, G.z_dim)).to(device)
+            angle_p = np.random.uniform(-0.2, 0.2)
+            angle_y = np.random.uniform(-0.4, 0.4)
+            cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
+            cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
+            cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
+            conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
+            camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1).to(device)
+            conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1).to(device)
 
-                eg_output = G.mapping(z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
-                eg_img = G.synthesis(eg_output, camera_params)['image']
-                lp_output = model(eg_img)
-                lp_img = G.synthesis(lp_output, camera_params)['image']
-                # need loss between eg3d and lp3d
+            eg_mapping = G.mapping(z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
+            eg_output = G.get_plane(eg_mapping)
+            eg_img = G.synthesis(eg_output, eg_mapping, camera_params)['image']
+            lp_output = model(eg_img)
+            lp_img = G.synthesis(lp_output, eg_mapping, camera_params)['image']
+            # need loss between eg3d and lp3d
 
-            # backward D
-                D.requires_grad_(True)
-                optimizer_D.zero_grad()
-                D_loss = (loss_bce(D(eg_img), True)+loss_bce(D(lp_img.detach()), False)) * 0.5
+        # backward D
+            D.requires_grad_(True)
+            optimizer_D.zero_grad()
+            D_loss = (loss_bce(D(eg_img), True)+loss_bce(D(lp_img.detach()), False)) * 0.5
             scaler.scale(D_loss).backward()
 
-            with autocast():
-                # backward lp3d
-                D.requires_grad_(False)
-                optimizer_lp3d.zero_grad()
-                lp3d_loss = loss_l1(lp_output, eg_output) + loss_l1(lp_img, eg_img) + 0.1*loss_bce(D(lp_img), True) + loss_lpips(lp_img, eg_img)
+            # backward lp3d
+            D.requires_grad_(False)
+            optimizer_lp3d.zero_grad()
+            lp3d_loss = loss_l1(lp_output, eg_output) + loss_l1(lp_img, eg_img) + 0.1*loss_bce(D(lp_img), True) + loss_lpips(lp_img, eg_img)
             scaler.scale(lp3d_loss).backward()
 
-            with autocast():
-                #second view
-                angle_p = np.random.uniform(-0.2, 0.2)
-                angle_y = np.random.uniform(-0.4, 0.4)
-                cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
-                cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
-                cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
-                conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
-                camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-                conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-                eg_img2 = G.synthesis(eg_output, camera_params)['image']
-                lp_img2 = G.synthesis(lp_output, camera_params)['image']
+            #second view
+            angle_p = np.random.uniform(-0.2, 0.2)
+            angle_y = np.random.uniform(-0.4, 0.4)
+            cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
+            cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
+            cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
+            conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
+            camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+            conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
+            eg_img2 = G.synthesis(eg_output, camera_params)['image']
+            lp_img2 = G.synthesis(lp_output, camera_params)['image']
 
             # backward D
-                D.requires_grad_(True)
-                optimizer_D.zero_grad()
-                D_loss = (loss_bce(D(eg_img2), True)+loss_bce(D(lp_img2.detach()), False)) * 0.5
+            D.requires_grad_(True)
+            optimizer_D.zero_grad()
+            D_loss = (loss_bce(D(eg_img2), True)+loss_bce(D(lp_img2.detach()), False)) * 0.5
             scaler.scale(D_loss).backward()
             for param_group in optimizer_D.param_groups:
                 param_group['lr'] = lr
@@ -162,15 +158,15 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             scaler.step(optimizer_D)
 
             # backward lp3d
-            with autocast():
-                D.requires_grad_(False)
-                optimizer_lp3d.zero_grad()
-                lp3d_loss = 0.025*loss_bce(D(lp_img2), True) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
+            D.requires_grad_(False)
+            optimizer_lp3d.zero_grad()
+            lp3d_loss = 0.025*loss_bce(D(lp_img2), True) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
             scaler.scale(lp3d_loss).backward()
             for param_group in optimizer_lp3d.param_groups:
                 param_group['lr'] = lr
             scaler.step(optimizer_lp3d)
             scaler.update()
+        torch.save(model.state_dict(), f'./checkpoint/lp3d_{epoch}.pth')
 
         
 if __name__ == "__main__":
