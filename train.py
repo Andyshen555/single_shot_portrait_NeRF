@@ -162,8 +162,9 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             # backward lp3d
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
-            lp3d_loss2 = 0.025*loss_bce(D(lp_img2), true_label) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
-            lp3d_loss2.backward()
+            lp3d_loss = 0.025*loss_bce(D(lp_img2), true_label)
+            # + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
+            lp3d_loss.backward()
             for param_group in optimizer_lp3d.param_groups:
                 param_group['lr'] = lr
             optimizer_lp3d.step()
