@@ -147,8 +147,8 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
             camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
             conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-            eg_img2 = G.synthesis(eg_output, camera_params)['image']
-            lp_img2 = G.synthesis(lp_output, camera_params)['image']
+            eg_img2 = G.synthesis(eg_output, eg_mapping, camera_params)['image']
+            lp_img2 = G.synthesis(lp_output, eg_mapping, camera_params)['image']
 
             # backward D
             D.requires_grad_(True)
