@@ -6,12 +6,14 @@ import random
 import argparse
 import numpy as np
 import torch.optim as optim
+from torch_utils import misc
 from typing import List, Tuple, Union
 from torch.cuda.amp import autocast, GradScaler
 
 import dnnlib
 import legacy
 from training.model import lp3d
+from training.triplane import TriPlaneGenerator
 from training.discriminator import Discriminator
 from camera_utils import LookAtPoseSampler, FOV_to_intrinsics
 
@@ -96,8 +98,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
     optimizer_D = torch.optim.Adam(D.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
     loss_l1 = torch.nn.L1Loss()
     loss_bce = torch.nn.BCEWithLogitsLoss()
-    loss_lpips = lpips.LPIPS(net='alex')
-    scaler = GradScaler()
+    loss_lpips = lpips.LPIPS(net='alex').requires_grad_(False)
     model.train()
     cam2world_pose = LookAtPoseSampler.sample(3.14/2, 3.14/2, torch.tensor([0, 0, 0.2], device=device), radius=2.7, device=device)
     intrinsics = FOV_to_intrinsics(fov_deg, device=device)
@@ -127,13 +128,13 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             D.requires_grad_(True)
             optimizer_D.zero_grad()
             D_loss = (loss_bce(D(eg_img), True)+loss_bce(D(lp_img.detach()), False)) * 0.5
-            scaler.scale(D_loss).backward()
+            D_loss.backward()
 
             # backward lp3d
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
             lp3d_loss = loss_l1(lp_output, eg_output) + loss_l1(lp_img, eg_img) + 0.1*loss_bce(D(lp_img), True) + loss_lpips(lp_img, eg_img)
-            scaler.scale(lp3d_loss).backward()
+            lp3d_loss.backward()
 
             #second view
             angle_p = np.random.uniform(-0.2, 0.2)
@@ -151,21 +152,19 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             D.requires_grad_(True)
             optimizer_D.zero_grad()
             D_loss = (loss_bce(D(eg_img2), True)+loss_bce(D(lp_img2.detach()), False)) * 0.5
-            scaler.scale(D_loss).backward()
+            D_loss.backward()
             for param_group in optimizer_D.param_groups:
                 param_group['lr'] = lr
             optimizer_D.step()
-            scaler.step(optimizer_D)
 
             # backward lp3d
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
             lp3d_loss = 0.025*loss_bce(D(lp_img2), True) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
-            scaler.scale(lp3d_loss).backward()
+            lp3d_loss.backward()
             for param_group in optimizer_lp3d.param_groups:
                 param_group['lr'] = lr
-            scaler.step(optimizer_lp3d)
-            scaler.update()
+            optimizer_lp3d.step()
         torch.save(model.state_dict(), f'./checkpoint/lp3d_{epoch}.pth')
 
         
@@ -202,6 +201,12 @@ if __name__ == "__main__":
     with dnnlib.util.open_url(args.network_pkl) as f:
         G = legacy.load_network_pkl(f)['G_ema'] # type: ignore
         G.eval().requires_grad_(False).to(device)
+    print("Reloading Modules!")
+    G_new = TriPlaneGenerator(*G.init_args, **G.init_kwargs).eval().requires_grad_(False).to(device)
+    misc.copy_params_and_buffers(G, G_new, require_all=True)
+    G_new.neural_rendering_resolution = G.neural_rendering_resolution
+    G_new.rendering_kwargs = G.rendering_kwargs
+    G = G_new
     print("Load Teacher Successfully")
     print('Start training...')
     train(model, G, D, args.truncation_psi, args.truncation_cutoff, args.fov_deg, rank=None)
