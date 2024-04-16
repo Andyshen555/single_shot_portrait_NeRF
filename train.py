@@ -136,7 +136,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
             lp3d_loss = loss_l1(lp_output, eg_output) + loss_l1(lp_img, eg_img) + 0.1*loss_bce(D(lp_img), true_label) + loss_lpips(lp_img, eg_img)
-            lp3d_loss.backward()
+            lp3d_loss.backward(retain_graph=True)
 
             #second view
             angle_p = np.random.uniform(-0.2, 0.2)
@@ -162,8 +162,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             # backward lp3d
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
-            # lp3d_loss = 0.025*loss_bce(D(lp_img2), true_label)
-            lp3d_loss = loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
+            lp3d_loss = 0.025*loss_bce(D(lp_img2), true_label) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
             lp3d_loss.backward()
             for param_group in optimizer_lp3d.param_groups:
                 param_group['lr'] = lr
@@ -203,13 +202,13 @@ if __name__ == "__main__":
     print("Load Discriminator Successfully")
     with dnnlib.util.open_url(args.network_pkl) as f:
         G = legacy.load_network_pkl(f)['G_ema'] # type: ignore
-        G.eval().requires_grad_(False).to(device)
     print("Reloading Modules!")
     G_new = TriPlaneGenerator(*G.init_args, **G.init_kwargs).eval().requires_grad_(False).to(device)
     misc.copy_params_and_buffers(G, G_new, require_all=True)
     G_new.neural_rendering_resolution = G.neural_rendering_resolution
     G_new.rendering_kwargs = G.rendering_kwargs
     G = G_new
+    G.eval().requires_grad_(False).to(device)
     print("Load Teacher Successfully")
     print('Start training...')
     train(model, G, D, args.truncation_psi, args.truncation_cutoff, args.fov_deg, rank=None)
