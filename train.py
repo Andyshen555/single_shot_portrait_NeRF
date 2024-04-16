@@ -97,7 +97,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
     optimizer_lp3d = torch.optim.Adam(model.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
     optimizer_D = torch.optim.Adam(D.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
     loss_l1 = torch.nn.L1Loss()
-    loss_bce = torch.nn.BCEWithLogitsLoss()
+    loss_bce = torch.nn.BCELoss()
     loss_lpips = lpips.LPIPS(net='alex').requires_grad_(False)
     model.train()
     cam2world_pose = LookAtPoseSampler.sample(3.14/2, 3.14/2, torch.tensor([0, 0, 0.2], device=device), radius=2.7, device=device)
@@ -123,17 +123,19 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             lp_output = model(eg_img)
             lp_img = G.synthesis(lp_output, eg_mapping, camera_params)['image']
             # need loss between eg3d and lp3d
+            true_label = torch.ones(lp_img.shape[0], 1).to(device)
+            false_label = torch.zeros(lp_img.shape[0], 1).to(device)
 
-        # backward D
+            # backward D
             D.requires_grad_(True)
             optimizer_D.zero_grad()
-            D_loss = (loss_bce(D(eg_img), True)+loss_bce(D(lp_img.detach()), False)) * 0.5
+            D_loss = (loss_bce(D(eg_img), true_label)+loss_bce(D(lp_img.detach()), false_label)) * 0.5
             D_loss.backward()
 
             # backward lp3d
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
-            lp3d_loss = loss_l1(lp_output, eg_output) + loss_l1(lp_img, eg_img) + 0.1*loss_bce(D(lp_img), True) + loss_lpips(lp_img, eg_img)
+            lp3d_loss = loss_l1(lp_output, eg_output) + loss_l1(lp_img, eg_img) + 0.1*loss_bce(D(lp_img), true_label) + loss_lpips(lp_img, eg_img)
             lp3d_loss.backward()
 
             #second view
@@ -151,7 +153,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             # backward D
             D.requires_grad_(True)
             optimizer_D.zero_grad()
-            D_loss = (loss_bce(D(eg_img2), True)+loss_bce(D(lp_img2.detach()), False)) * 0.5
+            D_loss = (loss_bce(D(eg_img2), true_label)+loss_bce(D(lp_img2.detach()), false_label)) * 0.5
             D_loss.backward()
             for param_group in optimizer_D.param_groups:
                 param_group['lr'] = lr
@@ -160,7 +162,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             # backward lp3d
             D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
-            lp3d_loss = 0.025*loss_bce(D(lp_img2), True) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
+            lp3d_loss = 0.025*loss_bce(D(lp_img2), true_label) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
             lp3d_loss.backward()
             for param_group in optimizer_lp3d.param_groups:
                 param_group['lr'] = lr
