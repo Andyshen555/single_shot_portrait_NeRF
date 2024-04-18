@@ -15,8 +15,7 @@ class lp3d(nn.Module):
         self.vit2 = encT()
 
     def forward(self, x):
-        feat = self.deeplabv3(x)
-        feat = feat['out']
+        feat = self.deeplabv3(x)['out']
         F_low = self.conv1(feat)
         f = self.vit1(F_low)
         F_high = self.encoder_high(x)

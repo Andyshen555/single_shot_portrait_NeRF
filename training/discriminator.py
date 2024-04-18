@@ -13,7 +13,7 @@ class Discriminator(nn.Module):
             nn.Linear(512, 128),
             nn.LeakyReLU(0.2),
             nn.Linear(128, 1),
-            nn.Sigmoid()
+            # nn.Sigmoid()
         )
 
 
