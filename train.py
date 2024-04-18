@@ -5,10 +5,8 @@ import torch
 import random
 import argparse
 import numpy as np
-import torch.optim as optim
 from torch_utils import misc
 from typing import List, Tuple, Union
-from torch.cuda.amp import autocast, GradScaler
 
 import dnnlib
 import legacy
@@ -94,27 +92,30 @@ def create_samples(N=256, voxel_origin=[0, 0, 0], cube_length=2.0):
     return samples.unsqueeze(0), voxel_origin, voxel_size
 
 def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
+    G= G.half()
+    D = D.half()
+    model = model.half()
     optimizer_lp3d = torch.optim.Adam(model.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
     optimizer_D = torch.optim.Adam(D.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
     loss_l1 = torch.nn.L1Loss()
     loss_bce = torch.nn.BCELoss()
     loss_lpips = lpips.LPIPS(net='alex').requires_grad_(False).to(device)
     model.train()
-    cam2world_pose = LookAtPoseSampler.sample(3.14/2, 3.14/2, torch.tensor([0, 0, 0.2], device=device), radius=2.7, device=device)
-    intrinsics = FOV_to_intrinsics(fov_deg, device=device)
+    cam2world_pose = LookAtPoseSampler.sample(3.14/2, 3.14/2, torch.tensor([0, 0, 0.2], device=device), radius=2.7, device=device).half()
+    intrinsics = FOV_to_intrinsics(fov_deg, device=device).half()
     for epoch in range(args.epoch):
         for i in range(3000):
             lr = get_learning_rate(epoch * 3000 + i)
 
             # first view
-            z = torch.from_numpy(np.random.randn(1, G.z_dim)).to(device)
+            z = torch.from_numpy(np.random.randn(1, G.z_dim)).to(device).half()
             angle_p = np.random.uniform(-0.2, 0.2)
             angle_y = np.random.uniform(-0.4, 0.4)
-            cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device)
+            cam_pivot = torch.tensor(G.rendering_kwargs.get('avg_camera_pivot', [0, 0, 0]), device=device).half()
             cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
             cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
             conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
-            camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1).to(device)
+            camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1).to(device).half()
             conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1).to(device)
 
             eg_mapping = G.mapping(z, conditioning_params, truncation_psi=truncation_psi, truncation_cutoff=truncation_cutoff)
@@ -123,8 +124,8 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
             lp_output = model(eg_img)
             lp_img = G.synthesis(lp_output, eg_mapping, camera_params)['image']
             # need loss between eg3d and lp3d
-            true_label = torch.ones(lp_img.shape[0], 1).to(device)
-            false_label = torch.zeros(lp_img.shape[0], 1).to(device)
+            true_label = torch.ones(lp_img.shape[0], 1).to(device).half()
+            false_label = torch.zeros(lp_img.shape[0], 1).to(device).half()
 
             # backward D
             D.requires_grad_(True)
