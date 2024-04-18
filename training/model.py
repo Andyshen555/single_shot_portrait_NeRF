@@ -85,7 +85,7 @@ class encT(nn.Module):
             channels = 128,
             dims = 1024,
             heads = 4,
-            ff_expansion = 4,
+            ff_expansion = 2,
             reduction_ratio = 1,
             num_layers = 1
         )
