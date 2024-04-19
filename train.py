@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import lpips
 import torch
 import random
@@ -17,13 +18,12 @@ from training.discriminator import Discriminator
 from camera_utils import LookAtPoseSampler, FOV_to_intrinsics
 
 def get_learning_rate(step):
-    # if step < 2000:
-    #     mul = step / 2000.
-    #     return 3e-4 * mul
-    # else:
-    #     mul = np.cos((step - 2000) / (args.epoch * args.step_per_epoch - 2000.) * math.pi) * 0.5 + 0.5
-    #     return (3e-4 - 3e-6) * mul + 3e-6
-    return 1e-4
+    if step < 2000:
+        mul = step / 2000.
+        return 3e-4 * mul
+    else:
+        mul = np.cos((step - 2000) / (args.epoch * args.step_per_epoch - 2000.) * math.pi) * 0.5 + 0.5
+        return (3e-4 - 3e-6) * mul + 3e-6
 
 def parse_range(s: Union[str, List]) -> List[int]:
     '''Parse a comma separated list of numbers or ranges and return a list of ints.
@@ -109,8 +109,8 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
     cam_radius = G.rendering_kwargs.get('avg_camera_radius', 2.7)
 
     for epoch in range(args.epoch):
-        for i in range(3000):
-            lr = get_learning_rate(epoch * 3000 + i)
+        for i in range(1600):
+            lr = get_learning_rate(epoch * 1600 + i)
             # first view
             z = torch.from_numpy(np.random.randn(1, G.z_dim)).to(device)
             angle_p = np.random.uniform(-0.2, 0.2)
@@ -172,18 +172,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg, rank):
                 param_group['lr'] = lr
             optimizer_lp3d.step()
             print(f'Epoch: {epoch}, Iter: {i}, lp3d_loss: {lp3d_loss.item()}, D_loss: {D_loss.item()}')
-            
-            del eg_img
-            del eg_img2
-            del eg_mapping
-            del eg_output
-            del lp_img
-            del lp_img2
-            del lp_output
-            del z
-            del camera_params
-            del conditioning_params
-            del conditioning_cam2world_pose
+
         torch.save(model.state_dict(), f'./checkpoint/lp3d.pth')
 
         
