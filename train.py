@@ -100,7 +100,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
             optimizer_lp3d.step()
 
             if i % 10 == 1 and rank == 0:
-                wandb.log({"learning_rate": 1e-4, "loss?model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
+                wandb.log({"learning_rate": 1e-4, "loss/model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
 
         torch.save(model.state_dict(), f'./checkpoint/lp3d.pth')
 
