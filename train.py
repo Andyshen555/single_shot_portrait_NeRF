@@ -26,40 +26,17 @@ def get_learning_rate(step):
     else:
         mul = np.cos((step - 2000) / (args.epoch * args.step_per_epoch - 2000.) * math.pi) * 0.5 + 0.5
         return (args.init_lr - 1e-6) * mul + 1e-6
-    
-
-def parse_range(s: Union[str, List]) -> List[int]:
-    '''
-    Parse a comma separated list of numbers or ranges and return a list of ints.
-    Example: '1,2,5-10' returns [1, 2, 5, 6, 7]
-    '''
-    if isinstance(s, list): return s
-    ranges = []
-    range_re = re.compile(r'^(\d+)-(\d+)$')
-    for p in s.split(','):
-        if m := range_re.match(p):
-            ranges.extend(range(int(m.group(1)), int(m.group(2))+1))
-        else:
-            ranges.append(int(p))
-    return ranges
-
-
-def parse_vec2(s: Union[str, Tuple[float, float]]) -> Tuple[float, float]:
-    '''
-    Parse a floating point 2-vector of syntax 'a,b'.
-    Example:
-        '0,1' returns (0,1)
-    '''
-    if isinstance(s, tuple): return s
-    parts = s.split(',')
-    if len(parts) == 2:
-        return (float(parts[0]), float(parts[1]))
-    raise ValueError(f'cannot parse 2-vector {s}')
 
 
 def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
-    optimizer_lp3d = torch.optim.Adam(model.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
-    optimizer_D = torch.optim.Adam(D.parameters(), lr=get_learning_rate(0), betas=(0.9, 0.999))
+    optimizer_lp3d = torch.optim.Adam([
+        {'params': model.deeplabv3.parameters(), 'lr': 1e-4},
+        {'params': model.conv1.parameters(), 'lr': 1e-4},
+        {'params': model.encoder_high.parameters(), 'lr': 1e-4},
+        {'params': model.vit1.parameters(), 'lr': 5e-5},
+        {'params': model.vit2.parameters(), 'lr': 5e-5},
+    ])
+    optimizer_D = torch.optim.Adam(D.parameters(), lr=5e-5)
     loss_l1 = torch.nn.L1Loss()
     loss_bce = torch.nn.BCEWithLogitsLoss()
     loss_lpips = lpips.LPIPS(net='alex').requires_grad_(False).to(device)
@@ -75,7 +52,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
 
     for epoch in range(args.epoch):
         for i in range(args.step_per_epoch):
-            lr = get_learning_rate(epoch * args.step_per_epoch + i)
+            cur_step = epoch * args.step_per_epoch + i
             # first view
             z = torch.from_numpy(np.random.randn(1, G.z_dim)).to(device)
             angle_p = np.random.uniform(-0.2, 0.2)
@@ -94,62 +71,36 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
                 lp_img = G.synthesis(lp_output, eg_mapping, camera_params)['image']
                 # need loss between eg3d and lp3d
 
-            # backward D
-            D.requires_grad_(True)
-            optimizer_D.zero_grad()
-            D_loss = (loss_bce(D(eg_img), true_label)+loss_bce(D(lp_img.detach()), false_label)) * 0.5
-            D_loss.backward()
+            if cur_step > 30000:
+                # backward D
+                D.requires_grad_(True)
+                optimizer_D.zero_grad()
+                D_loss = (loss_bce(D(eg_img), true_label)+loss_bce(D(lp_img.detach()), false_label)) * 0.5
+                D_loss.backward()
+                optimizer_D.step()
+
+                D.requires_grad_(False)
+                loss_adv = loss_bce(D(lp_img), true_label)
+                if i % 10 == 1 and rank == 0:
+                    wandb.log({"loss/adv": loss_adv.item()})
 
             # backward lp3d
-            D.requires_grad_(False)
             optimizer_lp3d.zero_grad()
 
             loss_model = loss_l1(lp_output, eg_output)
             loss_img = loss_l1(lp_img, eg_img)
-            loss_adv = loss_bce(D(lp_img), true_label)
             loss_lp = loss_lpips(lp_img, eg_img)
 
-            lp3d_loss =  0.02*loss_model + loss_img + 0.1*loss_adv + loss_lp
+            lp3d_loss =  0.01*loss_model + loss_img + loss_lp
+
+            if cur_step > 30000:
+                lp3d_loss = lp3d_loss + loss_adv
+
             lp3d_loss.backward()
-            # lp3d_loss.backward(retain_graph=True)
-
-
-            # #second view
-            # angle_p = np.random.uniform(-0.2, 0.2)
-            # angle_y = np.random.uniform(-0.4, 0.4)
-            # cam2world_pose = LookAtPoseSampler.sample(np.pi/2 + angle_y, np.pi/2 + angle_p, cam_pivot, radius=cam_radius, device=device)
-            # conditioning_cam2world_pose = LookAtPoseSampler.sample(np.pi/2, np.pi/2, cam_pivot, radius=cam_radius, device=device)
-            # camera_params = torch.cat([cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-            # conditioning_params = torch.cat([conditioning_cam2world_pose.reshape(-1, 16), intrinsics.reshape(-1, 9)], 1)
-            
-            # with torch.autocast(device_type="cuda"):
-            #     eg_img2 = G.synthesis(eg_output, eg_mapping, camera_params)['image']
-            #     lp_img2 = G.synthesis(lp_output, eg_mapping, camera_params)['image']
-
-            # # backward D
-            # D.requires_grad_(True)
-            # optimizer_D.zero_grad()
-            # D_loss = (loss_bce(D(eg_img2), true_label)+loss_bce(D(lp_img2.detach()), false_label)) * 0.5
-            # D_loss.backward()
-
-            # with torch.autocast(device_type="cuda"):
-            #     # backward lp3d
-            #     D.requires_grad_(False)
-            #     optimizer_lp3d.zero_grad()
-            #     lp3d_loss = 0.025*loss_bce(D(lp_img2), true_label) + loss_l1(lp_img2, eg_img2) + loss_lpips(lp_img2, eg_img2)
-            # lp3d_loss.backward()
-
-            # Update learn rate for optimizers
-            for param_group in optimizer_D.param_groups:
-                param_group['lr'] = lr
-            optimizer_D.step()
-            for param_group in optimizer_lp3d.param_groups:
-                param_group['lr'] = lr
             optimizer_lp3d.step()
-            # print(f'Epoch: {epoch}, Iter: {i}, lp3d_loss: {lp3d_loss.item()}, D_loss: {D_loss.item()}')
 
             if i % 10 == 1 and rank == 0:
-                wandb.log({"learning_rate": lr, "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
+                wandb.log({"learning_rate": 1e-4, "loss?model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
 
         torch.save(model.state_dict(), f'./checkpoint/lp3d.pth')
 
@@ -199,10 +150,13 @@ if __name__ == "__main__":
 
     model = lp3d(True).to(device)
     print("Load model Successfully")
+
     D = Discriminator().to(device)
     print("Load Discriminator Successfully")
+
     with dnnlib.util.open_url(args.network_pkl) as f:
-        G = legacy.load_network_pkl(f)['G_ema'] # type: ignore
+        G = legacy.load_network_pkl(f)['G_ema']
+
     print("Reloading Modules!")
     G_new = TriPlaneGenerator(*G.init_args, **G.init_kwargs).eval().requires_grad_(False).to(device)
     misc.copy_params_and_buffers(G, G_new, require_all=True)
@@ -212,5 +166,6 @@ if __name__ == "__main__":
     G.eval().requires_grad_(False).to(device)
     del G_new
     print("Load Teacher Successfully")
+    
     print('Start training...')
     train(model, G, D, args.truncation_psi, args.truncation_cutoff, args.fov_deg)
