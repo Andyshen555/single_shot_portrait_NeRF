@@ -30,11 +30,11 @@ def get_learning_rate(step):
 
 def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
     optimizer_lp3d = torch.optim.Adam([
-        {'params': model.deeplabv3.parameters(), 'lr': 1e-4},
-        {'params': model.conv1.parameters(), 'lr': 1e-4},
-        {'params': model.encoder_high.parameters(), 'lr': 1e-4},
-        {'params': model.vit1.parameters(), 'lr': 5e-5},
-        {'params': model.vit2.parameters(), 'lr': 5e-5},
+        {'params': model.deeplabv3.parameters(), 'lr': args.init_lr},
+        {'params': model.conv1.parameters(), 'lr': args.init_lr},
+        {'params': model.encoder_high.parameters(), 'lr': args.init_lr},
+        {'params': model.vit1.parameters(), 'lr': args.init_lr/2},
+        {'params': model.vit2.parameters(), 'lr': args.init_lr/2},
     ])
     optimizer_D = torch.optim.Adam(D.parameters(), lr=5e-5)
     loss_l1 = torch.nn.L1Loss()
@@ -71,18 +71,18 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
                 lp_img = G.synthesis(lp_output, eg_mapping, camera_params)['image']
                 # need loss between eg3d and lp3d
 
-            if cur_step > 30000:
-                # backward D
-                D.requires_grad_(True)
-                optimizer_D.zero_grad()
-                D_loss = (loss_bce(D(eg_img), true_label)+loss_bce(D(lp_img.detach()), false_label)) * 0.5
-                D_loss.backward()
-                optimizer_D.step()
+            # if cur_step > 30000:
+            #     # backward D
+            #     D.requires_grad_(True)
+            #     optimizer_D.zero_grad()
+            #     D_loss = (loss_bce(D(eg_img), true_label)+loss_bce(D(lp_img.detach()), false_label)) * 0.5
+            #     D_loss.backward()
+            #     optimizer_D.step()
 
-                D.requires_grad_(False)
-                loss_adv = loss_bce(D(lp_img), true_label)
-                if i % 10 == 1 and rank == 0:
-                    wandb.log({"loss/adv": loss_adv.item()})
+            #     D.requires_grad_(False)
+            #     loss_adv = loss_bce(D(lp_img), true_label)
+            #     if i % 10 == 1 and rank == 0:
+            #         wandb.log({"loss/adv": loss_adv.item()})
 
             # backward lp3d
             optimizer_lp3d.zero_grad()
@@ -91,16 +91,19 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
             loss_img = loss_l1(lp_img, eg_img)
             loss_lp = loss_lpips(lp_img, eg_img)
 
-            lp3d_loss =  0.01*loss_model + loss_img + loss_lp
+            # lp3d_loss =  0.01*loss_model + loss_img + loss_lp
+            lp3d_loss = loss_img + loss_lp
 
-            if cur_step > 30000:
-                lp3d_loss = lp3d_loss + loss_adv
+            # if cur_step > 30000:
+            #     lp3d_loss = lp3d_loss + loss_adv
 
             lp3d_loss.backward()
+            # torch.nn.utils.clip_grad_norm_(model.parameters(), 2.0)
             optimizer_lp3d.step()
 
             if i % 10 == 1 and rank == 0:
-                wandb.log({"learning_rate": 1e-4, "loss/model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
+                # wandb.log({"learning_rate": 1e-4, "loss/model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
+                wandb.log({"learning_rate": args.init_lr, "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
 
         torch.save(model.state_dict(), f'./checkpoint/lp3d.pth')
 
@@ -110,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument('--network_pkl', default='ffhq512-128.pkl', required=False)
     parser.add_argument('--epoch', default=300, type=int)
     parser.add_argument('--step_per_epoch', default=1600, type=int)
-    parser.add_argument('--init_lr', default=2e-4, type=int)
+    parser.add_argument('--init_lr', default=1e-4, type=int)
     parser.add_argument('--batch_size', default=1, type=int, help='minibatch size')
     parser.add_argument('--truncation_psi', default=1, type=int, help='minibatch size')
     parser.add_argument('--truncation_cutoff', default=14, type=int, help='minibatch size')
