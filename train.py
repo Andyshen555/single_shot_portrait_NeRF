@@ -113,7 +113,7 @@ if __name__ == "__main__":
     parser.add_argument('--network_pkl', default='ffhq512-128.pkl', required=False)
     parser.add_argument('--epoch', default=300, type=int)
     parser.add_argument('--step_per_epoch', default=1600, type=int)
-    parser.add_argument('--init_lr', default=1e-4, type=int)
+    parser.add_argument('--init_lr', default=1e-4, type=float)
     parser.add_argument('--batch_size', default=1, type=int, help='minibatch size')
     parser.add_argument('--truncation_psi', default=1, type=int, help='minibatch size')
     parser.add_argument('--truncation_cutoff', default=14, type=int, help='minibatch size')
