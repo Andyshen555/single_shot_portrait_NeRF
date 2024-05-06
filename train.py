@@ -92,7 +92,7 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
             loss_lp = loss_lpips(lp_img, eg_img)
 
             # lp3d_loss =  0.01*loss_model + loss_img + loss_lp
-            lp3d_loss = loss_img + loss_lp
+            lp3d_loss = loss_model
 
             # if cur_step > 30000:
             #     lp3d_loss = lp3d_loss + loss_adv
@@ -102,8 +102,8 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
             optimizer_lp3d.step()
 
             if i % 10 == 1 and rank == 0:
-                # wandb.log({"learning_rate": 1e-4, "loss/model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
-                wandb.log({"learning_rate": args.init_lr, "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
+                # wandb.log({"learning_rate": args.init_lr, "loss/model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
+                wandb.log({"learning_rate": args.init_lr, "loss/model_l1":loss_model.item(), "loss/img_l1": loss_img.item(), "loss/lpips": loss_lp.item()})
 
         torch.save(model.state_dict(), f'./checkpoint/lp3d.pth')
 
@@ -111,8 +111,8 @@ def train(model, G, D, truncation_psi, truncation_cutoff, fov_deg):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--network_pkl', default='ffhq512-128.pkl', required=False)
-    parser.add_argument('--epoch', default=300, type=int)
-    parser.add_argument('--step_per_epoch', default=1600, type=int)
+    parser.add_argument('--epoch', default=3000, type=int)
+    parser.add_argument('--step_per_epoch', default=2000, type=int)
     parser.add_argument('--init_lr', default=1e-4, type=float)
     parser.add_argument('--batch_size', default=1, type=int, help='minibatch size')
     parser.add_argument('--truncation_psi', default=1, type=int, help='minibatch size')
@@ -128,6 +128,8 @@ if __name__ == "__main__":
     torch.cuda.set_device(torch.device(local_rank))
     torch.backends.cudnn.benchmark = True
     device = torch.device('cuda')
+
+    args.init_lr = args.init_lr * ((world_size * args.batch_size) ** 0.5)
 
     if(rank == 0):
         wandb.init(
@@ -152,6 +154,8 @@ if __name__ == "__main__":
     torch.cuda.manual_seed_all(seed)
 
     model = lp3d(True).to(device)
+    if args.cont:
+        model.load_state_dict(torch.load(f'./checkpoint/lp3d.pth'))
     print("Load model Successfully")
 
     D = Discriminator().to(device)

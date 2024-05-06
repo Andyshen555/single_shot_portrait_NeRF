@@ -1,0 +1,1 @@
+nohup python -m torch.distributed.run --master_addr=dsai-hp-11.labs.hpicorp.net --master_port=1237 --nproc_per_node=2 --nnodes=2 --node_rank=0 train.py --init_lr 2e-5 >log.out 2>error.out &
