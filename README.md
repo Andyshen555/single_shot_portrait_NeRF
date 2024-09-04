@@ -1,6 +1,7 @@
-# LP3D Pytorch
+# Single Shot Portrait NeRF
 ## ReadMe
-This is a personal implementation of Nvidia lp3d work and is modified based on training results. Thus, the code does not faithfully represent what's discribed in the original paper.
+This is a personal project to generate 3D portrait model from a single RGB image. The project started from NVIDIA's lp3d and made modifications based on the original lp3d.\
+Our model has changed the dual branch encoder to learn a common human head shape (cannonical) and add details to the base 3D model.
 
 ## Environment setup
 1. Install anaconda
